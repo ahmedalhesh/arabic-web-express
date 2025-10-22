@@ -10,6 +10,7 @@ export interface IStorage {
   updateLicense(serialNumber: string, license: InsertLicense): Promise<License>;
   deleteLicense(serialNumber: string): Promise<void>;
   activateLicense(serialNumber: string, deviceId: string): Promise<License>;
+  resetLicenseActivation(serialNumber: string): Promise<License>;
 }
 
 export class SQLiteStorage implements IStorage {
@@ -135,6 +136,28 @@ export class SQLiteStorage implements IStorage {
   async deleteLicense(serialNumber: string): Promise<void> {
     const stmt = this.db.prepare("DELETE FROM licenses WHERE serial_number = ?");
     stmt.run(serialNumber);
+  }
+
+  async resetLicenseActivation(serialNumber: string): Promise<License> {
+    const existing = await this.getLicenseBySerial(serialNumber);
+    if (!existing) {
+      throw new Error("License not found");
+    }
+
+    const stmt = this.db.prepare(`
+      UPDATE licenses
+      SET active = 0, device_id = NULL, activation_date = NULL
+      WHERE serial_number = ?
+    `);
+
+    stmt.run(serialNumber);
+
+    return {
+      ...existing,
+      active: false,
+      device_id: null,
+      activation_date: null,
+    };
   }
 
   close() {

@@ -21,7 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { formatDate } from "@/lib/utils";
 import { removeAuthToken } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Plus, Search, Pencil, Trash2, LogOut, Shield, CheckCircle, XCircle } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, LogOut, Shield, CheckCircle, XCircle, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
@@ -108,6 +108,25 @@ export default function Dashboard() {
         variant: "destructive",
         title: "خطأ في حذف الترخيص",
         description: "حدث خطأ أثناء حذف الترخيص. حاول مرة أخرى.",
+      });
+    },
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: (serialNumber: string) =>
+      apiRequest<License>("POST", `/api/licenses/${serialNumber}/reset`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
+      toast({
+        title: "تم إعادة التعيين",
+        description: "تم إعادة تعيين التفعيل - يمكن الآن تفعيل الترخيص على جهاز جديد",
+      });
+    },
+    onError: () => {
+      toast({
+        variant: "destructive",
+        title: "خطأ",
+        description: "فشل إعادة تعيين التفعيل",
       });
     },
   });
@@ -348,14 +367,28 @@ export default function Dashboard() {
                             size="icon"
                             onClick={() => handleEdit(license)}
                             data-testid={`button-edit-${license.serial_number}`}
+                            title="تعديل"
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
+                          {license.device_id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => resetMutation.mutate(license.serial_number)}
+                              data-testid={`button-reset-${license.serial_number}`}
+                              title="إعادة تعيين التفعيل"
+                              disabled={resetMutation.isPending}
+                            >
+                              <RotateCcw className="h-4 w-4 text-warning" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => handleDelete(license.serial_number)}
                             data-testid={`button-delete-${license.serial_number}`}
+                            title="حذف"
                           >
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>

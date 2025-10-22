@@ -119,6 +119,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reset license activation (protected - admin only)
+  app.post("/api/licenses/:serial/reset", authMiddleware, async (req, res) => {
+    try {
+      const { serial } = req.params;
+      const license = await storage.resetLicenseActivation(serial);
+      res.json(license);
+    } catch (error) {
+      console.error("Reset license error:", error);
+      res.status(404).json({ error: "License not found" });
+    }
+  });
+
   // License verification endpoint (for Python clients - public)
   app.get("/api/check", async (req, res) => {
     try {
@@ -142,8 +154,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // If device is provided and license is not yet activated, activate it
-      if (device && typeof device === "string" && !license.active && license.status === "صالح") {
+      // If device is provided and license is not yet activated (no device_id), activate it
+      if (device && typeof device === "string" && !license.device_id && license.status === "صالح") {
         const activatedLicense = await storage.activateLicense(serial, device);
         return res.json({
           found: true,
@@ -157,30 +169,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check if license is valid
-      const isValid = license.active && license.status === "صالح";
-
-      // If device is provided and license has device_id, check if they match
-      if (device && license.device_id && license.device_id !== device) {
+      // If license has device_id, it must match the requesting device
+      if (license.device_id) {
+        if (!device || device !== license.device_id) {
+          return res.json({
+            found: true,
+            valid: false,
+            status: "الجهاز غير مطابق",
+            serial_number: license.serial_number,
+            program_name: license.program_name,
+            device_id: license.device_id,
+          });
+        }
+        
+        // Device matches - check if license is valid
+        const isValid = license.active && license.status === "صالح";
         return res.json({
           found: true,
-          valid: false,
-          status: "الجهاز غير مطابق",
+          valid: isValid,
+          status: license.status,
+          active: license.active,
           serial_number: license.serial_number,
           program_name: license.program_name,
           device_id: license.device_id,
+          activation_date: license.activation_date || undefined,
         });
       }
 
+      // License has no device_id yet - return info without activation
       res.json({
         found: true,
-        valid: isValid,
+        valid: false,
         status: license.status,
         active: license.active,
         serial_number: license.serial_number,
         program_name: license.program_name,
-        device_id: license.device_id || undefined,
-        activation_date: license.activation_date || undefined,
       });
     } catch (error) {
       console.error("Check license error:", error);
