@@ -136,11 +136,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { serial, device } = req.query;
 
+      // Both serial and device are required
       if (!serial || typeof serial !== "string") {
         return res.json({
           found: false,
           valid: false,
-          status: "غير موجود أو غير صالح",
+          status: "رقم السيريال مطلوب",
+        });
+      }
+
+      if (!device || typeof device !== "string") {
+        return res.json({
+          found: false,
+          valid: false,
+          status: "معرف الجهاز مطلوب",
         });
       }
 
@@ -150,60 +159,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           found: false,
           valid: false,
-          status: "غير موجود أو غير صالح",
+          status: "الترخيص غير موجود",
         });
       }
 
-      // If device is provided and license is not yet activated (no device_id), activate it
-      if (device && typeof device === "string" && !license.device_id && license.status === "صالح") {
-        const activatedLicense = await storage.activateLicense(serial, device);
-        return res.json({
-          found: true,
-          valid: true,
-          status: activatedLicense.status,
-          active: activatedLicense.active,
-          serial_number: activatedLicense.serial_number,
-          program_name: activatedLicense.program_name,
-          device_id: activatedLicense.device_id || undefined,
-          activation_date: activatedLicense.activation_date || undefined,
-        });
-      }
-
-      // If license has device_id, it must match the requesting device
-      if (license.device_id) {
-        if (!device || device !== license.device_id) {
+      // Case 1: License has no device_id yet (never activated)
+      if (!license.device_id) {
+        // If status is "صالح", activate it automatically
+        if (license.status === "صالح") {
+          const activatedLicense = await storage.activateLicense(serial, device);
           return res.json({
             found: true,
-            valid: false,
-            status: "الجهاز غير مطابق",
-            serial_number: license.serial_number,
-            program_name: license.program_name,
-            device_id: license.device_id,
+            valid: true,
+            status: activatedLicense.status,
+            active: activatedLicense.active,
+            serial_number: activatedLicense.serial_number,
+            program_name: activatedLicense.program_name,
+            device_id: activatedLicense.device_id,
+            activation_date: activatedLicense.activation_date,
           });
         }
         
-        // Device matches - check if license is valid
-        const isValid = license.active && license.status === "صالح";
+        // Status is not "صالح" - return actual status without activation
         return res.json({
           found: true,
-          valid: isValid,
+          valid: false,
           status: license.status,
-          active: license.active,
+          active: false,
           serial_number: license.serial_number,
           program_name: license.program_name,
-          device_id: license.device_id,
-          activation_date: license.activation_date || undefined,
         });
       }
 
-      // License has no device_id yet - return info without activation
-      res.json({
+      // Case 2: License has device_id - must match requesting device
+      if (license.device_id !== device) {
+        return res.json({
+          found: true,
+          valid: false,
+          status: "الجهاز غير مطابق",
+          serial_number: license.serial_number,
+          program_name: license.program_name,
+          device_id: license.device_id,
+        });
+      }
+
+      // Case 3: Device matches - check if license is valid
+      const isValid = license.active && license.status === "صالح";
+      return res.json({
         found: true,
-        valid: false,
+        valid: isValid,
         status: license.status,
         active: license.active,
         serial_number: license.serial_number,
         program_name: license.program_name,
+        device_id: license.device_id,
+        activation_date: license.activation_date || undefined,
       });
     } catch (error) {
       console.error("Check license error:", error);
