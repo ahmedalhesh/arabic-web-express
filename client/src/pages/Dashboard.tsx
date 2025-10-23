@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import type { License, InsertLicense } from "@shared/schema";
+import type { License } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -13,121 +13,77 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { StatusBadge } from "@/components/StatusBadge";
-import { LicenseDialog } from "@/components/LicenseDialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { GenerateSerialDialog } from "@/components/GenerateSerialDialog";
+import { EditNotesDialog } from "@/components/EditNotesDialog";
 import { DeleteDialog } from "@/components/DeleteDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useToast } from "@/hooks/use-toast";
 import { formatDate } from "@/lib/utils";
 import { removeAuthToken } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Plus, Search, Pencil, Trash2, LogOut, Shield, CheckCircle, XCircle, RotateCcw } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Plus, Pencil, Trash2, LogOut, Shield, Key, Search, Filter, X } from "lucide-react";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [licenseDialogOpen, setLicenseDialogOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedLicense, setSelectedLicense] = useState<License | undefined>();
-  const [licenseToDelete, setLicenseToDelete] = useState<string | null>(null);
+  const [selectedLicense, setSelectedLicense] = useState<License | null>(null);
+  
+  // Search and Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "serial">("date-desc");
 
-  const { data: licenses = [], isLoading, error } = useQuery<License[]>({
+  const { data: licenses = [], isLoading } = useQuery<License[]>({
     queryKey: ["/api/licenses"],
     retry: false,
   });
 
-  // Handle authentication errors
-  useEffect(() => {
-    if (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes("401")) {
-        removeAuthToken();
-        setLocation("/");
-      }
-    }
-  }, [error, setLocation]);
-
-  const createMutation = useMutation({
-    mutationFn: (data: InsertLicense) =>
-      apiRequest<License>("POST", "/api/licenses", data),
+  const generateMutation = useMutation({
+    mutationFn: (notes?: string) =>
+      apiRequest<{ success: boolean; serial: string; license: License }>(
+        "POST",
+        "/api/generate-serial",
+        { notes }
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
-      toast({
-        title: "تم إضافة الترخيص بنجاح",
-        description: "تم إضافة الترخيص الجديد إلى النظام",
-      });
-      setLicenseDialogOpen(false);
-      setSelectedLicense(undefined);
-    },
-    onError: () => {
-      toast({
-        variant: "destructive",
-        title: "خطأ في إضافة الترخيص",
-        description: "حدث خطأ أثناء إضافة الترخيص. حاول مرة أخرى.",
-      });
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: (data: InsertLicense) =>
-      apiRequest<License>("PUT", `/api/licenses/${data.serial_number}`, data),
+  const updateNotesMutation = useMutation({
+    mutationFn: ({ serial, notes }: { serial: string; notes: string }) =>
+      apiRequest<{ success: boolean }>("PUT", `/api/licenses/${serial}/notes`, { notes }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       toast({
-        title: "تم تحديث الترخيص بنجاح",
-        description: "تم حفظ التعديلات على الترخيص",
-      });
-      setLicenseDialogOpen(false);
-      setSelectedLicense(undefined);
-    },
-    onError: () => {
-      toast({
-        variant: "destructive",
-        title: "خطأ في تحديث الترخيص",
-        description: "حدث خطأ أثناء تحديث الترخيص. حاول مرة أخرى.",
+        title: "تم التحديث",
+        description: "تم تحديث الملاحظات بنجاح",
       });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (serialNumber: string) =>
-      apiRequest("DELETE", `/api/licenses/${serialNumber}`, {}),
+    mutationFn: (serial: string) =>
+      apiRequest("DELETE", `/api/licenses/${serial}`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       toast({
-        title: "تم حذف الترخيص بنجاح",
-        description: "تم حذف الترخيص من النظام",
+        title: "تم الحذف",
+        description: "تم حذف السيريال من النظام",
       });
       setDeleteDialogOpen(false);
-      setLicenseToDelete(null);
-    },
-    onError: () => {
-      toast({
-        variant: "destructive",
-        title: "خطأ في حذف الترخيص",
-        description: "حدث خطأ أثناء حذف الترخيص. حاول مرة أخرى.",
-      });
-    },
-  });
-
-  const resetMutation = useMutation({
-    mutationFn: (serialNumber: string) =>
-      apiRequest<License>("POST", `/api/licenses/${serialNumber}/reset`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
-      toast({
-        title: "تم إعادة التعيين",
-        description: "تم إعادة تعيين التفعيل - يمكن الآن تفعيل الترخيص على جهاز جديد",
-      });
-    },
-    onError: () => {
-      toast({
-        variant: "destructive",
-        title: "خطأ",
-        description: "فشل إعادة تعيين التفعيل",
-      });
+      setSelectedLicense(null);
     },
   });
 
@@ -140,45 +96,91 @@ export default function Dashboard() {
     setLocation("/");
   };
 
-  const handleAddNew = () => {
-    setSelectedLicense(undefined);
-    setLicenseDialogOpen(true);
+  const handleGenerate = async (notes?: string): Promise<string | null> => {
+    try {
+      const response = await generateMutation.mutateAsync(notes);
+      return response.serial;
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "خطأ",
+        description: "فشل توليد السيريال",
+      });
+      return null;
+    }
   };
 
   const handleEdit = (license: License) => {
     setSelectedLicense(license);
-    setLicenseDialogOpen(true);
+    setEditDialogOpen(true);
   };
 
-  const handleDelete = (serialNumber: string) => {
-    setLicenseToDelete(serialNumber);
+  const handleDelete = (license: License) => {
+    setSelectedLicense(license);
     setDeleteDialogOpen(true);
   };
 
-  const handleSubmitLicense = (data: InsertLicense) => {
-    if (selectedLicense) {
-      updateMutation.mutate(data);
-    } else {
-      createMutation.mutate(data);
-    }
+  const handleSaveNotes = async (serial: string, notes: string) => {
+    await updateNotesMutation.mutateAsync({ serial, notes });
   };
 
   const handleConfirmDelete = () => {
-    if (licenseToDelete) {
-      deleteMutation.mutate(licenseToDelete);
+    if (selectedLicense) {
+      deleteMutation.mutate(selectedLicense.serial_number);
     }
   };
 
-  const filteredLicenses = licenses.filter((license) => {
-    const query = searchQuery.toLowerCase();
-    return (
-      license.serial_number.toLowerCase().includes(query) ||
-      license.program_name.toLowerCase().includes(query) ||
-      license.status.includes(query) ||
-      (license.device_id && license.device_id.toLowerCase().includes(query)) ||
-      (license.notes && license.notes.toLowerCase().includes(query))
-    );
-  });
+  // Filtered and sorted licenses
+  const filteredLicenses = useMemo(() => {
+    let filtered = [...licenses];
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((license) => {
+        return (
+          license.serial_number.toLowerCase().includes(query) ||
+          (license.program_name && license.program_name.toLowerCase().includes(query)) ||
+          (license.device_id && license.device_id.toLowerCase().includes(query)) ||
+          (license.notes && license.notes.toLowerCase().includes(query))
+        );
+      });
+    }
+
+    // Apply status filter
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((license) => {
+        if (statusFilter === "active") {
+          return license.active === 1;
+        } else {
+          return license.active === 0;
+        }
+      });
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      if (sortBy === "date-desc") {
+        const dateA = a.activation_date ? new Date(a.activation_date).getTime() : 0;
+        const dateB = b.activation_date ? new Date(b.activation_date).getTime() : 0;
+        return dateB - dateA;
+      } else if (sortBy === "date-asc") {
+        const dateA = a.activation_date ? new Date(a.activation_date).getTime() : 0;
+        const dateB = b.activation_date ? new Date(b.activation_date).getTime() : 0;
+        return dateA - dateB;
+      } else {
+        return a.serial_number.localeCompare(b.serial_number);
+      }
+    });
+
+    return filtered;
+  }, [licenses, searchQuery, statusFilter, sortBy]);
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("all");
+    setSortBy("date-desc");
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -191,7 +193,7 @@ export default function Dashboard() {
                 <Shield className="w-6 h-6 text-primary" />
               </div>
               <h1 className="text-xl sm:text-2xl font-bold text-foreground">
-                نظام إدارة تراخيص البرامج
+                نظام إدارة التراخيص
               </h1>
             </div>
 
@@ -201,11 +203,10 @@ export default function Dashboard() {
                 variant="outline"
                 size="default"
                 onClick={handleLogout}
-                data-testid="button-logout"
                 className="gap-2"
               >
                 <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">تسجيل خروج</span>
+                <span className="hidden sm:inline">خروج</span>
               </Button>
             </div>
           </div>
@@ -216,78 +217,81 @@ export default function Dashboard() {
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Toolbar */}
         <Card className="p-4">
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <div className="relative w-full sm:w-96">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="بحث عن السيريال أو اسم البرنامج أو الحالة..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pr-10 text-right"
-                data-testid="input-search"
-              />
+          <div className="flex flex-col gap-4">
+            {/* Top Row - Stats and Add Button */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Key className="h-5 w-5" />
+                <span>إجمالي: <strong className="text-foreground">{licenses.length}</strong></span>
+                <span className="mx-2">•</span>
+                <span>النتائج: <strong className="text-primary">{filteredLicenses.length}</strong></span>
+                <span className="mx-2">•</span>
+                <span>نشطة: <strong className="text-success">{licenses.filter(l => l.active).length}</strong></span>
+              </div>
+
+              <Button
+                onClick={() => setGenerateDialogOpen(true)}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                توليد سيريال
+              </Button>
             </div>
 
-            <Button
-              onClick={handleAddNew}
-              className="gap-2 w-full sm:w-auto"
-              data-testid="button-add-license"
-            >
-              <Plus className="h-4 w-4" />
-              إضافة ترخيص جديد
-            </Button>
+            {/* Search and Filters Row */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Search Input */}
+              <div className="relative flex-1">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="بحث في السيريال، اسم البرنامج، معرف الجهاز، الملاحظات..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pr-10 text-right"
+                />
+              </div>
+
+              {/* Status Filter */}
+              <Select value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)}>
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <Filter className="h-4 w-4 ml-2" />
+                  <SelectValue placeholder="الحالة" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">جميع الحالات</SelectItem>
+                  <SelectItem value="active">نشط فقط</SelectItem>
+                  <SelectItem value="inactive">غير نشط فقط</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Sort By */}
+              <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="ترتيب حسب" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="date-desc">الأحدث أولاً</SelectItem>
+                  <SelectItem value="date-asc">الأقدم أولاً</SelectItem>
+                  <SelectItem value="serial">حسب السيريال</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Clear Filters */}
+              {(searchQuery || statusFilter !== "all" || sortBy !== "date-desc") && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={clearFilters}
+                  title="إلغاء التصفية"
+                  className="shrink-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
         </Card>
-
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">إجمالي التراخيص</p>
-                <p className="text-2xl font-bold">{licenses.length}</p>
-              </div>
-              <Shield className="h-8 w-8 text-primary opacity-20" />
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">التراخيص النشطة</p>
-                <p className="text-2xl font-bold text-success">
-                  {licenses.filter((l) => l.active).length}
-                </p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-success opacity-20" />
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">التراخيص الصالحة</p>
-                <p className="text-2xl font-bold text-success">
-                  {licenses.filter((l) => l.status === "صالح").length}
-                </p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-success opacity-20" />
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">التراخيص الموقوفة</p>
-                <p className="text-2xl font-bold text-destructive">
-                  {licenses.filter((l) => l.status === "موقوف").length}
-                </p>
-              </div>
-              <XCircle className="h-8 w-8 text-destructive opacity-20" />
-            </div>
-          </Card>
-        </div>
 
         {/* Licenses Table */}
         <Card>
@@ -296,69 +300,77 @@ export default function Dashboard() {
               <div className="p-8 text-center text-muted-foreground">
                 جاري تحميل التراخيص...
               </div>
+            ) : licenses.length === 0 ? (
+              <div className="p-8 text-center">
+                <Key className="h-12 w-12 mx-auto text-muted-foreground opacity-20 mb-4" />
+                <p className="text-muted-foreground mb-4">
+                  لا توجد تراخيص بعد
+                </p>
+                <Button
+                  onClick={() => setGenerateDialogOpen(true)}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  توليد أول سيريال
+                </Button>
+              </div>
             ) : filteredLicenses.length === 0 ? (
               <div className="p-8 text-center">
-                <Shield className="h-12 w-12 mx-auto text-muted-foreground opacity-20 mb-4" />
-                <p className="text-muted-foreground">
-                  {searchQuery ? "لا توجد نتائج للبحث" : "لا توجد تراخيص بعد"}
+                <Search className="h-12 w-12 mx-auto text-muted-foreground opacity-20 mb-4" />
+                <p className="text-muted-foreground mb-4">
+                  لا توجد نتائج تطابق البحث أو التصفية
                 </p>
-                {!searchQuery && (
-                  <Button
-                    onClick={handleAddNew}
-                    variant="outline"
-                    className="mt-4 gap-2"
-                    data-testid="button-add-first-license"
-                  >
-                    <Plus className="h-4 w-4" />
-                    إضافة أول ترخيص
-                  </Button>
-                )}
+                <Button
+                  onClick={clearFilters}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  <X className="h-4 w-4" />
+                  إلغاء التصفية
+                </Button>
               </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-right font-semibold">رقم السيريال</TableHead>
+                    <TableHead className="text-right font-semibold">السيريال</TableHead>
                     <TableHead className="text-right font-semibold">اسم البرنامج</TableHead>
-                    <TableHead className="text-right font-semibold">نشط</TableHead>
-                    <TableHead className="text-right font-semibold">رقم الجهاز</TableHead>
-                    <TableHead className="text-right font-semibold">تاريخ التفعيل</TableHead>
+                    <TableHead className="text-right font-semibold">معرف الجهاز</TableHead>
                     <TableHead className="text-right font-semibold">الحالة</TableHead>
+                    <TableHead className="text-right font-semibold">تاريخ التفعيل</TableHead>
                     <TableHead className="text-right font-semibold">الملاحظات</TableHead>
                     <TableHead className="text-right font-semibold">الإجراءات</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredLicenses.map((license) => (
-                    <TableRow key={license.serial_number} className="hover-elevate">
-                      <TableCell className="font-mono text-sm font-medium" data-testid={`text-serial-${license.serial_number}`}>
+                    <TableRow key={license.serial_number}>
+                      <TableCell className="font-mono text-sm font-medium">
                         {license.serial_number}
                       </TableCell>
                       <TableCell className="font-medium">
-                        {license.program_name}
+                        {license.program_name || <span className="text-muted-foreground">-</span>}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground font-mono">
+                        {license.device_id || <span className="text-muted-foreground">-</span>}
                       </TableCell>
                       <TableCell>
                         {license.active ? (
-                          <Badge variant="outline" className="bg-success/10 text-success border-success/20">
-                            نشط
+                          <Badge className="bg-success/10 text-success border-success/20">
+                            ✅ نشط
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="bg-muted text-muted-foreground">
-                            غير نشط
+                            ⏸️ غير نشط
                           </Badge>
                         )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {license.device_id || "-"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
                         {formatDate(license.activation_date)}
                       </TableCell>
-                      <TableCell>
-                        <StatusBadge status={license.status} />
-                      </TableCell>
                       <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
-                        {license.notes || "-"}
+                        {license.notes || <span className="text-muted-foreground">-</span>}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -366,28 +378,14 @@ export default function Dashboard() {
                             variant="ghost"
                             size="icon"
                             onClick={() => handleEdit(license)}
-                            data-testid={`button-edit-${license.serial_number}`}
-                            title="تعديل"
+                            title="تعديل الملاحظات"
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          {license.device_id && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => resetMutation.mutate(license.serial_number)}
-                              data-testid={`button-reset-${license.serial_number}`}
-                              title="إعادة تعيين التفعيل"
-                              disabled={resetMutation.isPending}
-                            >
-                              <RotateCcw className="h-4 w-4 text-warning" />
-                            </Button>
-                          )}
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleDelete(license.serial_number)}
-                            data-testid={`button-delete-${license.serial_number}`}
+                            onClick={() => handleDelete(license)}
                             title="حذف"
                           >
                             <Trash2 className="h-4 w-4 text-destructive" />
@@ -403,21 +401,29 @@ export default function Dashboard() {
         </Card>
       </main>
 
-      <LicenseDialog
-        open={licenseDialogOpen}
-        onOpenChange={setLicenseDialogOpen}
+      <GenerateSerialDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+        onGenerate={handleGenerate}
+        isLoading={generateMutation.isPending}
+      />
+
+      <EditNotesDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
         license={selectedLicense}
-        onSubmit={handleSubmitLicense}
-        isLoading={createMutation.isPending || updateMutation.isPending}
+        onSave={handleSaveNotes}
+        isLoading={updateNotesMutation.isPending}
       />
 
       <DeleteDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         onConfirm={handleConfirmDelete}
-        serialNumber={licenseToDelete || ""}
+        serialNumber={selectedLicense?.serial_number || ""}
         isLoading={deleteMutation.isPending}
       />
     </div>
   );
 }
+

@@ -1,168 +1,123 @@
 import Database from "better-sqlite3";
-import type { License, InsertLicense } from "@shared/schema";
-import { join } from "path";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
-export interface IStorage {
-  // License operations
-  getAllLicenses(): Promise<License[]>;
-  getLicenseBySerial(serialNumber: string): Promise<License | undefined>;
-  createLicense(license: InsertLicense): Promise<License>;
-  updateLicense(serialNumber: string, license: InsertLicense): Promise<License>;
-  deleteLicense(serialNumber: string): Promise<void>;
-  activateLicense(serialNumber: string, deviceId: string): Promise<License>;
-  resetLicenseActivation(serialNumber: string): Promise<License>;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const dbPath = join(__dirname, "..", "database.db");
+
+console.log("Database path:", dbPath);
+
+let db: Database.Database;
+try {
+  db = new Database(dbPath);
+  console.log("✅ Database connected successfully");
+} catch (error) {
+  console.error("❌ Database connection error:", error);
+  throw error;
 }
 
-export class SQLiteStorage implements IStorage {
-  private db: Database.Database;
+// Create licenses table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS licenses (
+    serial_number TEXT PRIMARY KEY,
+    program_name TEXT,
+    device_id TEXT,
+    active INTEGER DEFAULT 0,
+    activation_date TEXT,
+    notes TEXT
+  )
+`);
 
-  constructor() {
-    const dbPath = join(process.cwd(), "database.db");
-    this.db = new Database(dbPath);
-    this.initializeDatabase();
-  }
+export interface License {
+  serial_number: string;
+  program_name: string | null;
+  device_id: string | null;
+  active: number;
+  activation_date: string | null;
+  notes: string | null;
+}
 
-  private initializeDatabase() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS licenses (
-        serial_number TEXT PRIMARY KEY,
-        program_name TEXT NOT NULL,
-        active INTEGER NOT NULL DEFAULT 0,
-        device_id TEXT,
-        activation_date TEXT,
-        status TEXT NOT NULL,
-        notes TEXT
-      )
-    `);
-  }
-
-  async getAllLicenses(): Promise<License[]> {
-    const stmt = this.db.prepare("SELECT * FROM licenses ORDER BY serial_number");
-    const rows = stmt.all() as any[];
-    return rows.map(row => ({
-      ...row,
-      active: Boolean(row.active),
-    }));
-  }
-
-  async getLicenseBySerial(serialNumber: string): Promise<License | undefined> {
-    const stmt = this.db.prepare("SELECT * FROM licenses WHERE serial_number = ?");
-    const row = stmt.get(serialNumber) as any;
-    if (!row) return undefined;
-    return {
-      ...row,
-      active: Boolean(row.active),
-    };
-  }
-
-  async createLicense(license: InsertLicense): Promise<License> {
-    const stmt = this.db.prepare(`
-      INSERT INTO licenses (serial_number, program_name, active, device_id, activation_date, status, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      license.serial_number,
-      license.program_name,
-      0, // active defaults to false
-      null, // device_id defaults to null
-      null, // activation_date defaults to null
-      license.status,
-      license.notes
-    );
-
-    return {
-      serial_number: license.serial_number,
-      program_name: license.program_name,
-      active: false,
-      device_id: null,
-      activation_date: null,
-      status: license.status,
-      notes: license.notes,
-    };
-  }
-
-  async updateLicense(serialNumber: string, license: InsertLicense): Promise<License> {
-    const existing = await this.getLicenseBySerial(serialNumber);
-    if (!existing) {
-      throw new Error("License not found");
+export const storage = {
+  // Create new serial (admin generates)
+  createSerial(serial: string, notes?: string): License {
+    try {
+      console.log("Creating serial:", serial, "with notes:", notes);
+      const stmt = db.prepare(`
+        INSERT INTO licenses (serial_number, notes, active)
+        VALUES (?, ?, 0)
+      `);
+      const result = stmt.run(serial, notes || null);
+      console.log("Insert result:", result);
+      
+      return {
+        serial_number: serial,
+        program_name: null,
+        device_id: null,
+        active: 0,
+        activation_date: null,
+        notes: notes || null,
+      };
+    } catch (error) {
+      console.error("Error in createSerial:", error);
+      throw error;
     }
+  },
 
-    const stmt = this.db.prepare(`
-      UPDATE licenses
-      SET program_name = ?, status = ?, notes = ?
+  // Activate serial (end user activates)
+  activateSerial(serial: string, programName: string, deviceId: string): License | null {
+    const license = this.getBySerial(serial);
+    if (!license) return null;
+    
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      UPDATE licenses 
+      SET program_name = ?, device_id = ?, active = 1, activation_date = ?
       WHERE serial_number = ?
     `);
-
-    stmt.run(
-      license.program_name,
-      license.status,
-      license.notes,
-      serialNumber
-    );
-
+    stmt.run(programName, deviceId, now, serial);
+    
     return {
-      ...existing,
-      program_name: license.program_name,
-      status: license.status,
-      notes: license.notes,
-    };
-  }
-
-  async activateLicense(serialNumber: string, deviceId: string): Promise<License> {
-    const existing = await this.getLicenseBySerial(serialNumber);
-    if (!existing) {
-      throw new Error("License not found");
-    }
-
-    const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-
-    const stmt = this.db.prepare(`
-      UPDATE licenses
-      SET active = 1, device_id = ?, activation_date = ?
-      WHERE serial_number = ?
-    `);
-
-    stmt.run(deviceId, now, serialNumber);
-
-    return {
-      ...existing,
-      active: true,
+      ...license,
+      program_name: programName,
       device_id: deviceId,
+      active: 1,
       activation_date: now,
     };
-  }
+  },
 
-  async deleteLicense(serialNumber: string): Promise<void> {
-    const stmt = this.db.prepare("DELETE FROM licenses WHERE serial_number = ?");
-    stmt.run(serialNumber);
-  }
-
-  async resetLicenseActivation(serialNumber: string): Promise<License> {
-    const existing = await this.getLicenseBySerial(serialNumber);
-    if (!existing) {
-      throw new Error("License not found");
-    }
-
-    const stmt = this.db.prepare(`
-      UPDATE licenses
-      SET active = 0, device_id = NULL, activation_date = NULL
-      WHERE serial_number = ?
+  // Get all licenses
+  getAll(): License[] {
+    const stmt = db.prepare(`
+      SELECT * FROM licenses ORDER BY activation_date DESC
     `);
+    return stmt.all() as License[];
+  },
 
-    stmt.run(serialNumber);
+  // Get by serial
+  getBySerial(serial: string): License | null {
+    const stmt = db.prepare(`
+      SELECT * FROM licenses WHERE serial_number = ?
+    `);
+    return stmt.get(serial) as License | null;
+  },
 
-    return {
-      ...existing,
-      active: false,
-      device_id: null,
-      activation_date: null,
-    };
-  }
+  // Update notes only
+  updateNotes(serial: string, notes: string): boolean {
+    const stmt = db.prepare(`
+      UPDATE licenses SET notes = ? WHERE serial_number = ?
+    `);
+    const result = stmt.run(notes, serial);
+    return result.changes > 0;
+  },
 
-  close() {
-    this.db.close();
-  }
-}
+  // Delete serial
+  delete(serial: string): boolean {
+    const stmt = db.prepare(`
+      DELETE FROM licenses WHERE serial_number = ?
+    `);
+    const result = stmt.run(serial);
+    return result.changes > 0;
+  },
+};
 
-export const storage = new SQLiteStorage();

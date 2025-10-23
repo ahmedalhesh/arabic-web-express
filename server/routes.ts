@@ -1,12 +1,26 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
 import { verifyCredentials, generateToken, authMiddleware } from "./auth";
-import { loginSchema, insertLicenseSchema } from "@shared/schema";
+import { loginSchema } from "@shared/schema";
+import { storage } from "./storage";
+
+// Helper function to generate random serial
+function generateRandomSerial(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const parts = [];
+  for (let i = 0; i < 4; i++) {
+    let part = '';
+    for (let j = 0; j < 4; j++) {
+      part += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    parts.push(part);
+  }
+  return parts.join('-');
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication endpoint
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/login", async (req, res) => {
     try {
       const result = loginSchema.safeParse(req.body);
 
@@ -37,190 +51,170 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all licenses (protected)
+  // Generate new serial (admin only)
+  app.post("/api/generate-serial", authMiddleware, async (req, res) => {
+    try {
+      const { notes } = req.body;
+      
+      // Generate unique serial
+      let serial = generateRandomSerial();
+      while (storage.getBySerial(serial)) {
+        serial = generateRandomSerial();
+      }
+
+      const license = storage.createSerial(serial, notes);
+
+      res.json({
+        success: true,
+        serial,
+        license,
+      });
+    } catch (error: any) {
+      console.error("Generate serial error:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "فشل توليد السيريال",
+      });
+    }
+  });
+
+  // Activate serial (public - for end users)
+  app.post("/api/activate", async (req, res) => {
+    try {
+      const { serial, programName, deviceId } = req.body;
+
+      if (!serial || !programName || !deviceId) {
+        return res.status(400).json({
+          success: false,
+          message: "جميع الحقول مطلوبة",
+        });
+      }
+
+      const license = storage.getBySerial(serial);
+      if (!license) {
+        return res.status(404).json({
+          success: false,
+          message: "السيريال غير موجود",
+        });
+      }
+
+      if (license.active) {
+        return res.status(400).json({
+          success: false,
+          message: "السيريال مفعّل بالفعل",
+        });
+      }
+
+      const activatedLicense = storage.activateSerial(serial, programName, deviceId);
+
+      res.json({
+        success: true,
+        message: "تم تفعيل الترخيص بنجاح",
+        license: activatedLicense,
+      });
+    } catch (error: any) {
+      console.error("Activate error:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "فشل تفعيل الترخيص",
+      });
+    }
+  });
+
+  // Get all licenses (admin only)
   app.get("/api/licenses", authMiddleware, async (req, res) => {
     try {
-      const licenses = await storage.getAllLicenses();
+      const licenses = storage.getAll();
       res.json(licenses);
     } catch (error) {
       console.error("Get licenses error:", error);
-      res.status(500).json({ error: "Failed to fetch licenses" });
+      res.status(500).json({ message: "فشل جلب التراخيص" });
     }
   });
 
-  // Create a new license (protected)
-  app.post("/api/licenses", authMiddleware, async (req, res) => {
-    try {
-      const result = insertLicenseSchema.safeParse(req.body);
-
-      if (!result.success) {
-        return res.status(400).json({ 
-          error: "بيانات غير صحيحة",
-          details: result.error.errors 
-        });
-      }
-
-      const existingLicense = await storage.getLicenseBySerial(result.data.serial_number);
-      if (existingLicense) {
-        return res.status(409).json({ 
-          error: "رقم السيريال موجود بالفعل" 
-        });
-      }
-
-      const license = await storage.createLicense(result.data);
-      res.status(201).json(license);
-    } catch (error) {
-      console.error("Create license error:", error);
-      res.status(500).json({ error: "Failed to create license" });
-    }
-  });
-
-  // Update a license (protected)
-  app.put("/api/licenses/:serial", authMiddleware, async (req, res) => {
+  // Update notes (admin only)
+  app.put("/api/licenses/:serial/notes", authMiddleware, async (req, res) => {
     try {
       const { serial } = req.params;
-      const result = insertLicenseSchema.safeParse(req.body);
+      const { notes } = req.body;
 
-      if (!result.success) {
-        return res.status(400).json({ 
-          error: "بيانات غير صحيحة",
-          details: result.error.errors 
-        });
+      const success = storage.updateNotes(serial, notes || "");
+      
+      if (success) {
+        res.json({ success: true, message: "تم تحديث الملاحظات" });
+      } else {
+        res.status(404).json({ success: false, message: "الترخيص غير موجود" });
       }
-
-      const existingLicense = await storage.getLicenseBySerial(serial);
-      if (!existingLicense) {
-        return res.status(404).json({ error: "الترخيص غير موجود" });
-      }
-
-      const license = await storage.updateLicense(serial, result.data);
-      res.json(license);
     } catch (error) {
-      console.error("Update license error:", error);
-      res.status(500).json({ error: "Failed to update license" });
+      console.error("Update notes error:", error);
+      res.status(500).json({ success: false, message: "فشل تحديث الملاحظات" });
     }
   });
 
-  // Delete a license (protected)
+  // Delete license (admin only)
   app.delete("/api/licenses/:serial", authMiddleware, async (req, res) => {
     try {
       const { serial } = req.params;
 
-      const existingLicense = await storage.getLicenseBySerial(serial);
-      if (!existingLicense) {
-        return res.status(404).json({ error: "الترخيص غير موجود" });
+      const success = storage.delete(serial);
+      
+      if (success) {
+        res.json({ success: true, message: "تم حذف الترخيص" });
+      } else {
+        res.status(404).json({ success: false, message: "الترخيص غير موجود" });
       }
-
-      await storage.deleteLicense(serial);
-      res.status(204).send();
     } catch (error) {
       console.error("Delete license error:", error);
-      res.status(500).json({ error: "Failed to delete license" });
+      res.status(500).json({ success: false, message: "فشل حذف الترخيص" });
     }
   });
 
-  // Reset license activation (protected - admin only)
-  app.post("/api/licenses/:serial/reset", authMiddleware, async (req, res) => {
+  // Check license validity (public - for client apps)
+  app.post("/api/check-license", async (req, res) => {
     try {
-      const { serial } = req.params;
-      const license = await storage.resetLicenseActivation(serial);
-      res.json(license);
-    } catch (error) {
-      console.error("Reset license error:", error);
-      res.status(404).json({ error: "License not found" });
-    }
-  });
+      const { serial, deviceId } = req.body;
 
-  // License verification endpoint (for Python clients - public)
-  app.get("/api/check", async (req, res) => {
-    try {
-      const { serial, device } = req.query;
-
-      // Both serial and device are required
-      if (!serial || typeof serial !== "string") {
+      if (!serial || !deviceId) {
         return res.json({
-          found: false,
           valid: false,
-          status: "رقم السيريال مطلوب",
+          message: "بيانات غير كاملة",
         });
       }
 
-      if (!device || typeof device !== "string") {
-        return res.json({
-          found: false,
-          valid: false,
-          status: "معرف الجهاز مطلوب",
-        });
-      }
-
-      const license = await storage.getLicenseBySerial(serial);
-
+      const license = storage.getBySerial(serial);
+      
       if (!license) {
         return res.json({
-          found: false,
           valid: false,
-          status: "الترخيص غير موجود",
+          message: "السيريال غير موجود",
         });
       }
 
-      // Case 1: License has no device_id yet (never activated)
-      if (!license.device_id) {
-        // If status is "صالح", activate it automatically
-        if (license.status === "صالح") {
-          const activatedLicense = await storage.activateLicense(serial, device);
-          return res.json({
-            found: true,
-            valid: true,
-            status: activatedLicense.status,
-            active: activatedLicense.active,
-            serial_number: activatedLicense.serial_number,
-            program_name: activatedLicense.program_name,
-            device_id: activatedLicense.device_id,
-            activation_date: activatedLicense.activation_date,
-          });
-        }
-        
-        // Status is not "صالح" - return actual status without activation
+      if (!license.active) {
         return res.json({
-          found: true,
           valid: false,
-          status: license.status,
-          active: false,
-          serial_number: license.serial_number,
-          program_name: license.program_name,
+          message: "السيريال غير مفعّل",
         });
       }
 
-      // Case 2: License has device_id - must match requesting device
-      if (license.device_id !== device) {
+      if (license.device_id !== deviceId) {
         return res.json({
-          found: true,
           valid: false,
-          status: "الجهاز غير مطابق",
-          serial_number: license.serial_number,
-          program_name: license.program_name,
-          device_id: license.device_id,
+          message: "معرف الجهاز غير مطابق",
         });
       }
 
-      // Case 3: Device matches - check if license is valid
-      const isValid = license.active && license.status === "صالح";
-      return res.json({
-        found: true,
-        valid: isValid,
-        status: license.status,
-        active: license.active,
-        serial_number: license.serial_number,
-        program_name: license.program_name,
-        device_id: license.device_id,
-        activation_date: license.activation_date || undefined,
+      res.json({
+        valid: true,
+        programName: license.program_name,
+        activationDate: license.activation_date,
+        deviceId: license.device_id,
       });
     } catch (error) {
       console.error("Check license error:", error);
-      res.status(500).json({
-        found: false,
-        valid: false,
-        status: "خطأ في الخادم",
+      res.json({ 
+        valid: false, 
+        message: "خطأ في السيرفر" 
       });
     }
   });

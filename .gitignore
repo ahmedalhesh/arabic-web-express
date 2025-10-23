@@ -1,6 +1,45 @@
+# Dependencies
 node_modules
+package-lock.json
+
+# Build output
 dist
+build
+.wrangler
+
+# Database
+database.db
+*.db
+
+# Environment
+.env
+.env.local
+.dev.vars
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Temp files
+*.log
+*.tmp
+.cache
+
+# Local state
+.local
+.replit
+
+# Cloudflare
+wrangler.toml.backup
+.wrangler/
+
+# Other
 server/public
 vite.config.ts.*
 *.tar.gz

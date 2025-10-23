@@ -70,12 +70,23 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+  const startPort = parseInt(process.env.PORT || '8080', 10);
+  
+  const startServer = (port: number) => {
+    server.listen(port, "127.0.0.1", () => {
+      log(`✅ Server running on http://127.0.0.1:${port}`);
+      log(`🌐 Frontend: http://127.0.0.1:${port}`);
+      log(`🔌 API: http://127.0.0.1:${port}/api/check`);
+    }).on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        log(`⚠️  Port ${port} is busy, trying port ${port + 1}...`);
+        startServer(port + 1);
+      } else {
+        log(`❌ Server error: ${err.message}`);
+        process.exit(1);
+      }
+    });
+  };
+  
+  startServer(startPort);
 })();

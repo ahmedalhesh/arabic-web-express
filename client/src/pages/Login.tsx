@@ -31,7 +31,7 @@ export default function Login() {
     try {
       const response = await apiRequest<{ success: boolean; token?: string; message?: string }>(
         "POST",
-        "/api/auth/login",
+        "/api/login",
         data
       );
 
@@ -39,7 +39,7 @@ export default function Login() {
         setAuthToken(response.token);
         toast({
           title: "تم تسجيل الدخول بنجاح",
-          description: "مرحباً بك في نظام إدارة التراخيص",
+          description: "مرحباً بك في لوحة التحكم",
         });
         setLocation("/dashboard");
       } else {
@@ -73,7 +73,7 @@ export default function Login() {
           </div>
           <CardTitle className="text-2xl font-bold">نظام إدارة تراخيص البرامج</CardTitle>
           <CardDescription className="text-base">
-            قم بتسجيل الدخول للوصول إلى لوحة التحكم
+            قم بتسجيل الدخول للوصول إلى النظام
           </CardDescription>
         </CardHeader>
         <CardContent>
