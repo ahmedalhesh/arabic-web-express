@@ -41,7 +41,4 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           branch: main
           wranglerVersion: '3.0.0'
-        env:
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET || 'ArabicWebExpress2024SecretKey' }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'ArabicWebExpress2024SecretKey32' }}
 
