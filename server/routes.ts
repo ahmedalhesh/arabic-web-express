@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { verifyCredentials, generateToken, authMiddleware } from "./auth";
+import { verifyCredentials, generateToken, authMiddleware, updateLastLogin } from "./auth-db";
 import { loginSchema } from "@shared/schema";
 import { storage } from "./storage";
 
@@ -33,12 +33,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { username, password } = result.data;
 
-      if (!verifyCredentials(username, password)) {
+      // Get database connection
+      const db = (req as any).db || process.env.DB;
+      
+      if (!db) {
+        console.error("Database connection not available");
+        return res.status(500).json({ 
+          success: false, 
+          message: "خطأ في الاتصال بقاعدة البيانات" 
+        });
+      }
+
+      const isValid = await verifyCredentials(db, username, password);
+      
+      if (!isValid) {
         return res.status(401).json({ 
           success: false, 
           message: "اسم المستخدم أو كلمة المرور غير صحيحة" 
         });
       }
+
+      // Update last login
+      await updateLastLogin(db, username);
 
       const token = generateToken(username);
       res.json({ success: true, token });
