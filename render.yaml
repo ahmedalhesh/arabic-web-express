@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: arabic-web-express
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        value: ArabicWebExpress2024SecretKey
+      - key: PORT
+        value: 10000
+    healthCheckPath: /api/check
+    autoDeploy: true
