@@ -13,3 +13,9 @@ pages_build_output_dir = "dist/public"
 [env.production]
 vars = { NODE_ENV = "production" }
 
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "licenses_db"
+database_id = "dcb78a60-f5c3-499b-9d04-d04e59e2dc3c"
+
