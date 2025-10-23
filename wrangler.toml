@@ -1,24 +1,15 @@
-# Cloudflare Workers Configuration
+# Cloudflare Pages Configuration
 name = "arabic-web-express"
-main = "dist/index.js"
 compatibility_date = "2024-01-01"
 
 [build]
 command = "npm run build"
 cwd = "./"
 
+# Pages configuration
+pages_build_output_dir = "dist/public"
+
 # Environment variables
 [env.production]
 vars = { NODE_ENV = "production" }
-
-# Bindings for D1 Database (SQLite on Cloudflare)
-[[d1_databases]]
-binding = "DB"
-database_name = "licenses_db"
-database_id = "your-database-id" # سيتم إنشاؤه تلقائياً
-
-# Routes
-routes = [
-  { pattern = "yourdomain.com/*", zone_name = "yourdomain.com" }
-]
 
